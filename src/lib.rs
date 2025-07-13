@@ -165,6 +165,26 @@ where
     }
 }
 
+pub struct IntoIter<V, P>
+where
+    V: Hash + Eq + ToPartial<P>,
+    P: Hash + Eq,
+{
+    inner: std::collections::hash_set::IntoIter<Partial<V, P>>,
+}
+
+impl<V, P> Iterator for IntoIter<V, P>
+where
+    V: Hash + Eq + ToPartial<P>,
+    P: Hash + Eq,
+{
+    type Item = V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|p| p.value)
+    }
+}
+
 impl<V, P> PartialSet<V, P>
 where
     V: ToPartial<P>,
@@ -289,11 +309,28 @@ where
         Q: ?Sized + Hash + Eq,
         Partial<V, P>: Borrow<Q>,
     {
-        // self.inner.;
         self.inner.take(value).map(|v| v.value)
     }
 
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.inner.try_reserve(additional)
+    }
+
+    // ...
+}
+
+impl<V, P, S> IntoIterator for PartialSet<V, P, S>
+where
+    V: Hash + Eq + ToPartial<P>,
+    S: BuildHasher,
+    P: Hash + Eq,
+{
+    type Item = V;
+    type IntoIter = IntoIter<V, P>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            inner: self.inner.into_iter(),
+        }
     }
 }
