@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod test;
+
 use std::{
     borrow::Borrow,
     collections::{HashSet, TryReserveError},
@@ -5,17 +8,21 @@ use std::{
     marker::PhantomData,
 };
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PartialSet<V, P, S = RandomState>
+where
+    V: ToPartial<P>,
+    P: Hash + Eq,
+    S: BuildHasher,
+{
+    inner: HashSet<Partial<V, P>, S>,
+}
+
 pub trait ToPartial<P> {
     fn to_partial(&self) -> &P;
 }
 
-impl<V: ToPartial<P>, P> ToPartial<P> for &V {
-    fn to_partial(&self) -> &P {
-        (*self).to_partial()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct Partial<V, P>
 where
     V: ToPartial<P>,
@@ -25,13 +32,55 @@ where
     marker: PhantomData<P>,
 }
 
+pub struct Iter<'a, V, P>
+where
+    V: ToPartial<P>,
+    P: Hash + Eq,
+{
+    inner: std::collections::hash_set::Iter<'a, Partial<V, P>>,
+}
+
+pub struct Drain<'a, V, P>
+where
+    V: ToPartial<P>,
+    P: Hash + Eq,
+{
+    inner: std::collections::hash_set::Drain<'a, Partial<V, P>>,
+}
+
+impl<V: ToPartial<P>, P> ToPartial<P> for &V {
+    fn to_partial(&self) -> &P {
+        (*self).to_partial()
+    }
+}
+
+pub struct Difference<'a, V, P, S>
+where
+    V: ToPartial<P>,
+    P: Hash + Eq,
+    S: 'a,
+{
+    inner: std::collections::hash_set::Difference<'a, Partial<V, P>, S>,
+}
+
+pub struct IntoIter<V, P>
+where
+    V: Hash + Eq + ToPartial<P>,
+    P: Hash + Eq,
+{
+    inner: std::collections::hash_set::IntoIter<Partial<V, P>>,
+}
+
 impl<V, P> Partial<V, P>
 where
     V: ToPartial<P>,
     P: Hash + Eq,
 {
-    pub fn into_value(self) -> V {
-        self.value
+    fn new(value: V) -> Self {
+        Partial {
+            value,
+            marker: PhantomData,
+        }
     }
 }
 
@@ -94,31 +143,6 @@ where
     }
 }
 
-pub struct PartialSet<V, P, S = RandomState>
-where
-    V: ToPartial<P>,
-    P: Hash + Eq,
-    S: BuildHasher,
-{
-    inner: HashSet<Partial<V, P>, S>,
-}
-
-pub struct Iter<'a, V, P>
-where
-    V: ToPartial<P>,
-    P: Hash + Eq,
-{
-    inner: std::collections::hash_set::Iter<'a, Partial<V, P>>,
-}
-
-pub struct Drain<'a, V, P>
-where
-    V: ToPartial<P>,
-    P: Hash + Eq,
-{
-    inner: std::collections::hash_set::Drain<'a, Partial<V, P>>,
-}
-
 impl<'a, V, P> Iterator for Drain<'a, V, P>
 where
     V: ToPartial<P>,
@@ -143,15 +167,6 @@ where
     }
 }
 
-pub struct Difference<'a, V, P, S>
-where
-    V: ToPartial<P>,
-    P: Hash + Eq,
-    S: 'a,
-{
-    inner: std::collections::hash_set::Difference<'a, Partial<V, P>, S>,
-}
-
 impl<'a, V, P, S> Iterator for Difference<'a, V, P, S>
 where
     V: ToPartial<P>,
@@ -163,14 +178,6 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|v| &v.value)
     }
-}
-
-pub struct IntoIter<V, P>
-where
-    V: Hash + Eq + ToPartial<P>,
-    P: Hash + Eq,
-{
-    inner: std::collections::hash_set::IntoIter<Partial<V, P>>,
 }
 
 impl<V, P> Iterator for IntoIter<V, P>
@@ -331,6 +338,54 @@ where
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             inner: self.inner.into_iter(),
+        }
+    }
+}
+
+impl<'a, V, P, S> Extend<&'a V> for PartialSet<V, P, S>
+where
+    V: Hash + Eq + ToPartial<P> + Clone,
+    S: BuildHasher,
+    P: Hash + Eq,
+{
+    fn extend<T: IntoIterator<Item = &'a V>>(&mut self, iter: T) {
+        self.inner
+            .extend(iter.into_iter().map(|v| v.clone().into()));
+    }
+}
+
+impl<V, P, S> Extend<V> for PartialSet<V, P, S>
+where
+    V: Hash + Eq + ToPartial<P>,
+    S: BuildHasher,
+    P: Hash + Eq,
+{
+    fn extend<T: IntoIterator<Item = V>>(&mut self, iter: T) {
+        self.inner.extend(iter.into_iter().map(|v| v.into()));
+    }
+}
+
+impl<V, P, const N: usize> From<[V; N]> for PartialSet<V, P, RandomState>
+where
+    V: Hash + Eq + ToPartial<P>,
+    P: Hash + Eq,
+{
+    fn from(value: [V; N]) -> Self {
+        Self {
+            inner: value.into_iter().map(Partial::from).collect(),
+        }
+    }
+}
+
+impl<V, P, S> FromIterator<V> for PartialSet<V, P, S>
+where
+    V: Hash + Eq + ToPartial<P>,
+    P: Hash + Eq,
+    S: BuildHasher + Default,
+{
+    fn from_iter<T: IntoIterator<Item = V>>(iter: T) -> Self {
+        Self {
+            inner: iter.into_iter().map(Partial::from).collect(),
         }
     }
 }
